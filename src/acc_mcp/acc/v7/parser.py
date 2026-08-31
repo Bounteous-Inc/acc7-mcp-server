@@ -159,8 +159,24 @@ def parse_count(body: str) -> int:
 
 
 def parse_entity_document(body: str) -> str:
-    """Return the entity XML from a GetEntityIfMoreRecent response, unwrapped."""
-    raise NotImplementedError
+    """Return the entity XML from a GetEntityIfMoreRecent response, unwrapped.
+
+    The payload sits under `pdomDoc` as a single element — the schema, source
+    schema or other entity. Only the SOAP scaffolding is stripped; the document
+    itself is returned verbatim, because element nesting and ordering carry
+    meaning that a JSON projection would lose.
+
+    Returns "" when the entity is absent and `bMustExist` was false.
+    """
+    root = _parse(body)
+    holder = _find_local(root, "pdomDoc") or _find_local(root, "pdomOutput")
+    if holder is None:
+        raise AccError("Entity request returned no document")
+
+    children = [child for child in holder if isinstance(child.tag, str)]
+    if not children:
+        return ""
+    return etree.tostring(children[0], encoding="unicode")
 
 
 def parse_instance_test(body: str) -> dict[str, Any]:

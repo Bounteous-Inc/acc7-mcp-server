@@ -90,7 +90,7 @@ class ServerSettings(BaseSettings):
     acc_timeout_seconds: int = 60
     acc_default_page_size: int = 200
     acc_max_rows: int = 500
-    acc_max_response_chars: int = 50_000
+    acc_max_response_chars: int = 120_000
     acc_max_retries: int = 3
     acc_verify_tls: bool = True
     acc_log_level: str = "INFO"

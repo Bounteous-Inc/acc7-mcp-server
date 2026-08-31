@@ -9,7 +9,8 @@ from pydantic import Field
 from .. import tool_result
 from ..config import get_server_settings
 from ..deps import get_client
-from ..formatting import cap_rows
+from ..acc.v7.inventory import trim_inventory
+from ..formatting import cap_document, cap_rows
 
 
 def register(mcp) -> None:
@@ -72,16 +73,18 @@ def register(mcp) -> None:
             Field(description="Fully qualified schema name, e.g. 'nms:recipient'."),
         ],
         form: Annotated[
-            Literal["compiled", "source", "wsdl"],
+            Literal["inventory", "compiled", "source", "wsdl"],
             Field(
                 description=(
-                    "'source' = what this client customised, including "
-                    "extendedSchema; 'compiled' = effective runtime structure "
-                    "with joins, keys and indexes; 'wsdl' = SOAP method "
-                    "signatures only."
+                    "'inventory' (default) = compact JSON structure: fields, "
+                    "types, links, keys, enumerations. Use this unless you "
+                    "need raw XML. 'source' = what this client customised, "
+                    "including extendedSchema. 'compiled' = full effective "
+                    "structure as XML; large schemas will be truncated. "
+                    "'wsdl' = SOAP method signatures only."
                 )
             ),
-        ] = "compiled",
+        ] = "inventory",
     ) -> dict[str, Any]:
         """Fetch the structure of one schema as raw XML.
 
@@ -90,7 +93,41 @@ def register(mcp) -> None:
         Use form='compiled' for the effective structure: fields, types, keys,
         indexes and the <join> elements that reveal schema-to-schema links.
 
-        Returns XML as a string; element nesting carries meaning, so it is not
-        flattened to JSON.
+        Default form='inventory' returns compact JSON — fields with types and
+        lengths, links with their join conditions, keys, indexes and
+        enumerations. That is what a migration audit needs, and it fits where
+        raw XML does not: nms:delivery is 236k as XML but a few thousand as an
+        inventory.
+
+        The XML forms return a string rather than JSON because element nesting
+        and ordering carry meaning. They can exceed the response budget and be
+        truncated mid-element — check the `truncated` flag before parsing.
         """
-        raise NotImplementedError
+        try:
+            client = await get_client()
+            settings = get_server_settings()
+
+            if form == "inventory":
+                inventory = await client.get_schema_inventory(schema)
+                inventory = trim_inventory(inventory, settings.acc_max_response_chars)
+                return tool_result.ok({"form": form, **inventory})
+
+            xml = await client.get_schema_definition(schema, form)
+            entity_key = (
+                f"schemawsdl.jsp?schema={schema}"
+                if form == "wsdl"
+                else f"{'xtk:srcSchema' if form == 'source' else 'xtk:schema'}|{schema}"
+            )
+            return tool_result.ok(
+                {
+                    "schema": schema,
+                    "form": form,
+                    **cap_document(
+                        xml,
+                        settings.acc_max_response_chars,
+                        entity_key=entity_key,
+                    ),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - reported as data, see tool_result
+            return tool_result.error(exc, context={"schema": schema, "form": form})

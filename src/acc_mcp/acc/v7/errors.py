@@ -62,17 +62,18 @@ class QueryError(AccError):
 
 
 class SchemaNotFoundError(AccError):
-    """The named schema does not exist on this instance. e.g. XFR-180000."""
+    """The named schema or entity does not exist. XFR-180000 / XSV-350000."""
 
     def friendly(self) -> str:
-        # ACC reports this as a missing file and includes the server's internal
-        # datakit path. The agent needs the schema name, not our filesystem.
+        # ACC reports these as a missing file and often includes the server's
+        # internal datakit path. The agent needs the identifier, not our
+        # filesystem layout.
         match = re.search(r"identifier '([^']+)'", self.detail or "")
-        subject = f"Schema {match.group(1)!r}" if match else "The requested schema"
+        subject = f"{match.group(1)!r}" if match else "The requested item"
         return (
-            f"{subject} does not exist on this instance. Call list_schemas to "
-            "see what is available — names are case-sensitive and must be "
-            "fully qualified, e.g. 'nms:recipient'."
+            f"{subject} was not found on this instance. If that is a schema "
+            "name, call list_schemas to check it — names are case-sensitive "
+            "and must be fully qualified, e.g. 'nms:recipient'."
         )
 
 
@@ -109,11 +110,10 @@ class TransportError(AccError):
 _FAULT_PATTERNS: list[tuple[re.Pattern[str], type[AccError]]] = [
     (re.compile(r"XSV-350012|invalid login or password", re.I), AuthError),
     (re.compile(r"XSV-350008|session .*(expired|invalid)|invalid session", re.I), SessionExpiredError),
-    (re.compile(r"XFR-180000", re.I), SchemaNotFoundError),
-    (
-        re.compile(r"attribute 'name' unknown.*schema '.*workflow|XSV-350000", re.I),
-        EntityKeyError,
-    ),
+    # Order matters: the key-resolver failure also mentions a missing
+    # document, so match its distinctive wording before the not-found codes.
+    (re.compile(r"attribute 'name' unknown", re.I), EntityKeyError),
+    (re.compile(r"XFR-180000|XSV-350000", re.I), SchemaNotFoundError),
     (
         re.compile(r"access denied|not authoriz|insufficient rights|no read right", re.I),
         PermissionError_,

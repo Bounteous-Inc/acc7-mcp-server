@@ -68,7 +68,7 @@ class SessionState:
 | 1 | `test_connection`       | —                                                                             | instance info, latency | Diagnostic: instance reachable + credentials valid | ✅                                                        |
 | 2 | `list_schemas`          | `namespace?`, `include_builtin?`                                           | JSON rows              | Discovery — what exists                           | ✅                                                        |
 | 3 | `count_records`         | `schema`, `where?`                                                         | `{count}`            | Sizing; 0 rows = dead table                        | ✅                                                        |
-| 4 | `get_schema_definition` | `schema`, `form`=`compiled`\|`source`\|`wsdl`                        | raw XML                | Field/type/join/extension detail                   | ✅                                                        |
+| 4 | `get_schema_definition` | `schema`, `form`=`inventory`\|`compiled`\|`source`\|`wsdl` | JSON inventory (default) or raw XML | Field/type/join/key/enum detail | ✅ |
 | 5 | `query_schema`          | `schema`, `fields`, `where?`, `order_by?`, `page_size?`, `cursor?` | JSON rows              | Config reads — workflows, deliveries              | ✅                                                        |
 | 6 | `get_entity`            | `entity_key`, `must_exist?`                                                | raw entity XML         | Full entity body for dependency edges              | ⚠️`@name`-keyed schemas only; **not** workflows |
 
@@ -136,19 +136,30 @@ Steps 2–4 are cheap and narrow scope before the expensive per-schema calls at 
 
 ---
 
-## 6. Open item
+## 6. Open item — entity memo content
 
-**Workflow activity XML retrieval** — gates *workflow-level* dependency mapping only; schema-level is proven.
+**Unresolved after a timeboxed spike (2026-08-24).** Blocks *both* delivery configuration
+(`content`, `targets`, `mailParameters`, `tracking`, `scheduling`) and workflow activities.
+This is the substance the testing team verifies.
 
-Ruled out with evidence:
+**It is an addressing problem, not a memo problem.**
 
-- `xtk:persist#GetEntityIfMoreRecent` — key resolver builds `where @name = …`; `xtk:workflow` uses `@internalName` and has no `@name`
-- `xtk:persist#Load` — reads `.xml` files from the server's `datakit/eng/workflow/` directory, not the database
-- `queryDef` selecting `<node expr="activities"/>` — accepted but returns empty; everything beneath is `xml="true"` memo-mapped, not SQL-mapped
+- ✅ Memo content retrieves fine for `@name`-keyed schemas — `xtk:persist#LoadAsText` on
+  `xtk:javascript|nms:aaexception.js` returned 3,114 chars of real JS source.
+- ❌ `nms:delivery` and `xtk:workflow` have no `@name` (they use `@internalName`), and the
+  key resolver always builds `where @name = …`. Every pk form fails.
+- ❌ `queryDef` cannot reach memo content at all: container selects return empty elements,
+  leaf selects error *"Element 'var' unknown"* despite being declared in the compiled
+  schema, no-`<select>` returns a bare element, `fullLoad="true"` has no effect.
+- ❌ `Load` / `LoadIfExists` / `LoadAsText` fall back to reading `datakit/eng/<type>/<id>.xml`
+  off the server's disk for non-`@name` schemas.
+- ❌ `LoadExpandedContents` (SOP-330011, no detail) and `GetXmlStruct` (echoes the queryDef).
 
-Untested leads: typed child elements of `activities` (`query`, `scheduler`, `js`, `jump`…) selected individually; the memo column itself; `xtk:workflowTask` for a per-activity view.
+**Next avenue:** packet-capture the client console opening a delivery — it can clearly load
+them, so a working call exists.
 
-Handled as a timeboxed spike during implementation. If it stays unreachable, the plan degrades to workflow metadata plus `xtk:workflowTask`, stated explicitly rather than shipped as a silent gap.
+**Partial fallback:** `xtk:workflowTask` (40,522 rows here) has `@activity` plus a workflow
+link, but holds *execution* records — which activities ran, not how they are configured.
 
 ---
 

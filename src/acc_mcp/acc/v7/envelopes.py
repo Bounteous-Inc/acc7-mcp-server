@@ -97,5 +97,20 @@ def build_get_entity(
     md5: str = "",
     must_exist: bool = True,
 ) -> str:
-    """`xtk:persist#GetEntityIfMoreRecent`."""
-    raise NotImplementedError
+    """`xtk:persist#GetEntityIfMoreRecent`.
+
+    Note the service: this method is declared in the xtk:session WSDL but its
+    soapAction is `xtk:persist#...`, and the body namespace must match. Sending
+    it as xtk:session returns SOP-330024 "Unspecified function library".
+
+    `pk` is `schema|name`, e.g. `xtk:schema|nms:recipient`. Passing an empty
+    `md5` always returns the document; passing a known md5 returns it only if
+    it has changed since (the basis for caching in a later phase).
+    """
+    body = f"""    <GetEntityIfMoreRecent xmlns="urn:xtk:persist" SOAP-ENV:encodingStyle="{_ENCODING_STYLE}">
+      <sessiontoken xsi:type="xsd:string">{escape(session_token)}</sessiontoken>
+      <strPk xsi:type="xsd:string">{escape(pk)}</strPk>
+      <strMd5 xsi:type="xsd:string">{escape(md5)}</strMd5>
+      <bMustExist xsi:type="xsd:boolean">{"true" if must_exist else "false"}</bMustExist>
+    </GetEntityIfMoreRecent>"""
+    return _wrap(body)

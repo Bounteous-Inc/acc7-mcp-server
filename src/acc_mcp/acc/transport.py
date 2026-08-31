@@ -23,6 +23,14 @@ class TransportFailure(Exception):
     """Network failure, or retries exhausted. Wrapped by the client layer."""
 
 
+class LoginRedirect(TransportFailure):
+    """A JSSP page bounced us to the login form — the session is not valid.
+
+    Its own type so the client can retry after a re-logon, rather than the
+    caller sniffing an error string.
+    """
+
+
 class Transport:
     """Owns the httpx client and the retry policy.
 
@@ -125,13 +133,13 @@ class Transport:
     ) -> str:
         """Authenticated HTTP GET, used for schemawsdl.jsp and /r/test."""
         response = await self._request("GET", url, params=params, headers=headers or {})
-        if response.status_code >= 400:
-            raise TransportFailure(f"HTTP {response.status_code} from {url}")
         if response.status_code in (301, 302, 303, 307, 308):
-            raise TransportFailure(
+            raise LoginRedirect(
                 f"HTTP {response.status_code} redirect from {url} — "
                 "the endpoint requires an authenticated session"
             )
+        if response.status_code >= 400:
+            raise TransportFailure(f"HTTP {response.status_code} from {url}")
         return response.text
 
     async def aclose(self) -> None:

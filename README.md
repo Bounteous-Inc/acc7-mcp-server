@@ -5,9 +5,8 @@ inventory, schema audit and dependency mapping.
 
 **Status:** in progress. All six tools are registered and discoverable.
 Implemented and verified against a live v7.4.3 instance: `test_connection`,
-`list_schemas`, `count_records`. The remaining three
-(`get_schema_definition`, `query_schema`, `get_entity`) raise
-`NotImplementedError`.
+`list_schemas`, `count_records`, `get_schema_definition`. The remaining two
+(`query_schema`, `get_entity`) raise `NotImplementedError`.
 
 See `plan.md` for the implementation plan, `my-ref.md` for the quick reference,
 and `acc7-mcp-server-plan.md` §0 for verified errata against the original design.

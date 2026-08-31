@@ -196,6 +196,7 @@ Runs `Logon`, reports instance URL, resolved auth mode, whether the session was 
 
 | `form` | Call | Verified |
 |---|---|---|
+| `inventory` **(default)** | derived from `compiled`; compact JSON, not XML | ✅ 10k / 42k / 13k for recipient / delivery / workflow |
 | `compiled` | `xtk:persist#GetEntityIfMoreRecent` with `strPk="xtk:schema\|<schema>"` | ✅ 18.6 KB for `nms:recipient` |
 | `source` | `xtk:persist#GetEntityIfMoreRecent` with `strPk="xtk:srcSchema\|<schema>"` | ✅ 11.7 KB for `nms:recipient` |
 | `wsdl` | authenticated `GET schemawsdl.jsp?schema=<schema>` | ✅ 302 without session → 200 with |
@@ -303,6 +304,12 @@ Mirrored into `DEVIATIONS.md` in the repo.
 17. **`get_entity` is limited to `@name`-keyed schemas.** Workflows are excluded; the tool must say so clearly instead of surfacing a raw fault.
 18. **`md5` comes back free on schema rows** — adopt it as the Phase 2 cache key rather than inventing one.
 
+**Added 2026-08-24:**
+
+21. **`get_schema_definition` defaults to an `inventory` form**, not raw XML. The raw compiled document is 236k for `nms:delivery` and 535k for `xtk:workflow`, so the response cap truncated them to 21% and 9% — mid-element, therefore unparseable. The inventory carries what an audit needs (fields with types, links with join conditions, keys, indexes, referenced enumerations) at 10k–42k, and is honest about what it leaves out: memo structures are named with declared-field counts, and any budget trimming is listed in `trimmed`. Raw `compiled`/`source`/`wsdl` remain available.
+22. **`ACC_MAX_RESPONSE_CHARS` raised 50k → 120k.** The cap is ours, not ACC's or MCP's — ACC returns 535k documents happily and MCP has no limit. The real constraint is context budget. 120k (~30k tokens) lets the largest schema's complete inventory through untrimmed; sampling 24 sql-mapped schemas gave a median of 4,684 chars, so `nms:delivery` and `xtk:workflow` are ~50x outliers, not the norm.
+23. **The inventory is complete, not selective.** Every field is listed, memo-mapped ones flagged `"xml": true`; every enumeration is included, referenced or not. An earlier version listed only SQL fields and referenced enums — defensible for size, wrong for an audit that has to account for what exists.
+
 **Added 2026-08-10:**
 
 19. **Transport is selectable again** via `MCP_TRANSPORT`, defaulting to `http`. Deleting stdio outright cost more than parity gained: the server had to be started by hand, and an orphaned process on port 8000 would silently serve stale code.
@@ -367,12 +374,26 @@ Re-run the same nine checks through the MCP tools and confirm identical results,
 
 ### Still open
 
-1. **Workflow activity XML retrieval.** The one unsolved item, and it gates *workflow-level* dependency mapping (schema-level is proven). Ruled out with evidence:
-   - `xtk:persist#GetEntityIfMoreRecent` — resolves keys via `@name`; `xtk:workflow` has none.
-   - `xtk:persist#Load` — reads `.xml` files from the server's `datakit/eng/workflow/` directory, not the database: *"The file '/usr/local/neolane/nl6/datakit/eng/workflow/1935.xml' does not exist on the server."*
-   - `queryDef` selecting `<node expr="activities"/>` — accepted, but returns an empty `<activities/>`; everything beneath it is `xml="true"` memo-mapped rather than SQL-mapped.
+1. **Entity memo content — delivery configuration and workflow activities.** *(Spike run 2026-08-24; unresolved.)*
 
-   Untested leads: the typed child elements of `activities` (`query`, `scheduler`, `js`, `jump`…) selected individually; the memo column itself; `xtk:workflowTask` for a per-activity view. **Timeboxed spike during implementation** — if it stays unreachable, the plan degrades to workflow metadata plus `xtk:workflowTask` and says so explicitly rather than shipping a silent gap.
+   Wider than previously recorded: the same mechanism blocks **deliveries** (`content`, `targets`, `mailParameters`, `tracking`, `properties`, `scheduling`) as well as workflow activities. This is the substance the testing team verifies, so it is the largest gap in the audit.
+
+   **What the spike established:**
+
+   | Finding | Evidence |
+   |---|---|
+   | ✅ Memo content **is** retrievable in principle | `xtk:persist#GetEntityIfMoreRecent` and `#LoadAsText` on `xtk:javascript\|nms:aaexception.js` returned 3,114 chars of actual JS source from the memo |
+   | ❌ `queryDef` cannot reach it, four ways | selecting the container returns `<mailParameters/>` empty; selecting any leaf inside → *"Element 'var' unknown"* even though the compiled schema declares it; omitting `<select>` entirely returns a bare 222-char element; `fullLoad="true"` changes nothing |
+   | ❌ The blocker is **key resolution**, not memo access | the resolver always builds `where @name = …`. `nms:delivery` and `xtk:workflow` have no `@name` (they use `@internalName`), so every pk form fails |
+   | ❌ `Load` / `LoadIfExists` / `LoadAsText` share the resolver | for non-`@name` schemas they fall through to reading `datakit/eng/<type>/<id>.xml` off disk → `XFR-180000` / `XSV-350001` |
+   | ❌ `nms:delivery#LoadExpandedContents` | `SOP-330011` with an empty detail |
+   | ❌ `xtk:queryDef#GetXmlStruct` | echoes the queryDef back with `showSQL`; not entity content |
+
+   **Conclusion:** not a memo problem — an addressing problem. Everything works for `@name`-keyed schemas and nothing works for the two that matter.
+
+   **Untried, in order of promise:** capture what the client console actually sends when opening a delivery (it clearly can load them, so a working call exists); check whether a pk form derived from the schema's declared `<key>` is accepted; investigate JSSP endpoints outside `soaprouter.jsp`.
+
+   **Partial fallback available:** `xtk:workflowTask` holds 40,522 rows on this instance with an `@activity` attribute and a link to `xtk:workflow`. Caveat — these are *execution* records, so they show which activities ran, not the workflow's definition or configuration.
 
 2. **API account rights (tightening).** What to request: a dedicated technical operator (not a shared human login), with read access to the folders in scope and read rights on `nms:` / `cus:` schemas. Reading the system tables this server depends on — `xtk:schema`, `xtk:srcSchema`, `xtk:workflow` — usually needs elevated rights in practice; on a **stage** sandbox the pragmatic ask is an admin-group operator used read-only, then tighten to least-privilege before anything points at production. Verify against the instance rather than assuming.
 3. **MCP-layer auth — now live, not hypothetical.** With stdio removed (2026-08-09), even local runs are an HTTP endpoint, and it is currently unauthenticated: anything that can reach the port inherits the service account's read access to the instance. Bound to `127.0.0.1` this is limited to processes on the dev machine, which is acceptable for a sandbox POC. **Before binding to anything other than loopback**, pick one: a bearer token on the transport, OAuth 2.1 (FastMCP has first-class helpers), or network-level restriction.

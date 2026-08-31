@@ -29,6 +29,10 @@ class AccAdapter(Protocol):
         """Raw XML for one schema, in the requested representation."""
         ...
 
+    async def get_schema_inventory(self, schema: str) -> dict[str, Any]:
+        """Compact structural inventory: fields, links, keys, enumerations."""
+        ...
+
     async def query(
         self,
         schema: str,

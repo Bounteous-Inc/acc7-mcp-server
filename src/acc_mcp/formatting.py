@@ -55,7 +55,28 @@ def cap_document(
 ) -> dict[str, Any]:
     """Wrap a raw XML document with metadata, truncating if oversized.
 
-    Returns `{xml, bytes, truncated, entity_key}`. XML is returned as a string,
+    Returns `{xml, chars, truncated, entity_key}`. XML is returned as a string,
     not converted to JSON — element nesting and ordering carry meaning.
+
+    Truncation cuts mid-document, so the result will not parse as XML. The note
+    says so explicitly: a caller that assumed a well-formed document and fed it
+    to a parser would otherwise get a confusing syntax error instead of an
+    obvious "this was too big" signal.
     """
-    raise NotImplementedError
+    total = len(xml)
+    truncated = total > max_chars
+    result: dict[str, Any] = {
+        "xml": xml[:max_chars] if truncated else xml,
+        "chars": total,
+        "truncated": truncated,
+    }
+    if entity_key:
+        result["entity_key"] = entity_key
+    if truncated:
+        result["note"] = (
+            f"Document is {total} chars, truncated to {max_chars}. The XML is "
+            "cut mid-element and will NOT parse — treat it as a partial view, "
+            "not a document. Some schemas (xtk:workflow is ~535k) are far "
+            "larger than the response budget."
+        )
+    return result
