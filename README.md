@@ -8,8 +8,9 @@ Implemented and verified against a live v7.4.3 instance: `test_connection`,
 `list_schemas`, `count_records`, `get_schema_definition`. The remaining two
 (`query_schema`, `get_entity`) raise `NotImplementedError`.
 
-See `plan.md` for the implementation plan, `my-ref.md` for the quick reference,
-and `acc7-mcp-server-plan.md` §0 for verified errata against the original design.
+See `ref-docs/TOOLS.md` for the full tool definitions (inputs, examples, error
+contract), `ref-docs/DESIGN.md` for the architecture and the decisions behind it,
+and `ref-docs/NEXT-STEPS.md` for the plan covering the two remaining tools.
 
 The server is **generic**: it works against any ACCv7 instance. `MCP_TRANSPORT`
 picks the transport, and that determines how a client says which instance it
